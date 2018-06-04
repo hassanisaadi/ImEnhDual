@@ -28,9 +28,8 @@ def tofile(fname, x):
 
 X = []
 Y = []
-meta = []
 output_dir = 'data.mb.2014'
-test_samples = 3
+test_samples = 1
 
 ### 2014 dataset ###
 base1 = 'data.mb/unzip/vision.middlebury.edu/stereo/data/scenes2014/datasets'
@@ -47,7 +46,7 @@ for dir in sorted(os.listdir(base1)):
         num_light = len(os.listdir(base3))
 
         for l in range(num_light):
-            print('l = '+str(l))
+            #print('l = '+str(l+1))
             imgs = []
             for fname in sorted(os.listdir(base3 + '/L{}'.format(l+1))):
                 base4 = os.path.join(base3, 'L{}'.format(l+1))
@@ -58,35 +57,37 @@ for dir in sorted(os.listdir(base1)):
                     fname2 = fname[0:2] + str(cam) + 'e' + exp + fname[5:]
                     if not os.path.isfile(base4 + '/' + fname2):
                         continue
-                    # print('  fname = '+fname)
-                    # print('  fname2= '+fname2)
+                    #print('  fname = '+fname)
+                    #print('  fname2= '+fname2)
                     im0 = read_im(os.path.join(base4,fname ), True)
                     im1 = read_im(os.path.join(base4,fname2), True)
                     imgs.append(im0)
                     imgs.append(im1)
             _, _, height, width = imgs[0].shape
-            print(imgs[0].shape)
-            print(len(imgs))
-            XX.append(np.concatenate(imgs).reshape(len(imgs)//2, 2, 3, height, width))
+            #print(imgs[0].shape) # e.g. 1x3x992x1436
+            #print(len(imgs)) # e.g. 16
+            tmp = np.concatenate(imgs).reshape(len(imgs)//2, 2, 3, height, width)
+            #print(tmp.shape) # e.g. 8x2x3x992x1436
+            XX.append(tmp)
 
         X.append(XX)
+        #print(len(X[0])) # e.g. 4
+        #print(X[0][0].shape) # e.g. 8x2x3x992x1436
         Y.append(y)
-        meta.append((y.shape[2], y.shape[3]))
 print('2014 dataset processed!')
 
-print('There are {} images in this dataset.'.format(len(meta)))
 print('X len = ' + str(len(X)))
 print('Y len = ' + str(len(Y)))
 
-meta = np.array(meta, dtype=np.int32)
-tofile('{}/meta.bin'.format(output_dir), meta)
-
+k = 0
 for i in range(len(X)):
-    if i <= len(X) - test_samples:
-        tmp = 'train'
+    if i < len(X) - test_samples:
+        for j in range(len(X[i])):
+            tofile('{}/x_train_{}_{}.bin'.format(output_dir, i+1, j+1), X[i][j])
+        tofile('{}/y_train_{}.bin'.format(output_dir, i+1), Y[i])
     else:
-        tmp = 'test'
-    for j in range(len(X[i])):
-        tofile('{}/x_{}_{}_{}.bin'.format(output_dir, tmp, i+1, j+1), X[i][j])
-    tofile('{}/y_{}_{}.bin'.format(output_dir, tmp, i+1), Y[i])
+        for j in range(len(X[i])):
+            tofile('{}/x_test_{}_{}.bin'.format(output_dir, k+1, j+1), X[i][j])
+        tofile('{}/y_test_{}.bin'.format(output_dir, k+1), Y[i])
+        k = k + 1
 
