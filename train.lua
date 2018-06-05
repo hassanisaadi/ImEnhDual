@@ -2,7 +2,7 @@
 
 require 'sys'
 require 'torch'
---require 'loadcaffe'
+require 'loadcaffe'
 
 io.stdout:setvbuf('no')
 
@@ -33,9 +33,9 @@ torch.manualSeed(opt.seed)
 if opt.g then
   cutorch.manualSeed(opt.seed)
   cutorch.setDevice(tonumber(opt.gpu))
-  --vgg = loadcaffe.load(opt.vggProto, opt.vggmodel, 'cudnn')
+  vgg = loadcaffe.load(opt.vggProto, opt.vggmodel, 'cudnn')
 else
-  --vgg = loadcaffe.load(opt.vggProto, opt.vggmodel, 'nn')
+  vgg = loadcaffe.load(opt.vggProto, opt.vggmodel, 'nn')
 end
 
 
@@ -112,59 +112,68 @@ for n = 1, opt.sceneNum do
 end
 print('Loaded trainig data.')
 
--- Network
-net_l = nn.Sequential()
-net_r = nn.Sequential()
-net_p = nn.Parallel(1,2)
+-- Transfer Learning
+-- Using the first layers of VGG netwrok for feature extraction.
+vgg_l = nn.Sequential()
+vgg_r = nn.Sequential()
+for i=1, #vgg.modules do
+  m = vgg:get(i)
+  if torch.typename(m) == 'nn.View' or torch.typename(m) == 'cudnn.View' then  --!!!! for gpu it should be tested.
+    break
+  end
+  vgg_l:add(m)
+  vgg_r:add(m)
+end
+
 net = nn.Sequential()
+net_p = nn.Parallel(1,2)
+net_p:add(vgg_l)
+net_p:add(vgg_r)
+net:add(net_p)
+
 if opt.g then
-                                   --nIn, nOut, kW, kH, dW, dH, padW, padH
-  net_l:add(cudnn.SpatialConvolution(3  , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_l:add(cudnn.ReLU(true))
-  net_l:add(cudnn.SpatialConvolution(64 , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_l:add(cudnn.ReLU(true))
-  net_l:add(cudnn.SpatialConvolution(64 , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_l:add(cudnn.ReLU(true))
-
-  net_r:add(cudnn.SpatialConvolution(3  , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_r:add(cudnn.ReLU(true))
-  net_r:add(cudnn.SpatialConvolution(64 , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_r:add(cudnn.ReLU(true))
-  net_r:add(cudnn.SpatialConvolution(64 , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_r:add(cudnn.ReLU(true))
-
-  net_p:add(net_l)
-  net_p:add(net_r)
-
-  net:add(net_p)
-  net:add(cudnn.SpatialConvolution(  128, 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
+                                    --nIn  , nOut, kW, kH, dW, dH, padW, padH 
+  net:add(cudnn.SpatialFullConvolution(1024, 1024, 4 , 4 , 2 , 2 , 1   , 1   ))
   net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(   64, 3   , 3 , 3 , 1 , 1 , 1   , 1   ))
+  
+  net:add(cudnn.SpatialFullConvolution(1024, 512 , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(cudnn.ReLU(true))
+  
+  net:add(cudnn.SpatialFullConvolution(512 , 256 , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(cudnn.ReLU(true))
+ 
+  net:add(cudnn.SpatialFullConvolution(256 , 128 , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(cudnn.ReLU(true))
+
+  net:add(cudnn.SpatialFullConvolution(128 , 64  , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(cudnn.ReLU(true))
+
+  net:add(cudnn.SpatialConvolution(    64  , 3   , 3 , 3 , 1 , 1 , 1   , 1   ))
+  net:add(cudnn.ReLU(true))
+
   net:add(cudnn.Sigmoid(true))
   net:cuda()
   criterion = nn.MSECriterion():cuda()
 else
-  net_l:add(nn.SpatialConvolution(   3  , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_l:add(nn.ReLU(true))
-  net_l:add(nn.SpatialConvolution(   64 , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_l:add(nn.ReLU(true))
-  net_l:add(nn.SpatialConvolution(   64 , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_l:add(nn.ReLU(true))
-
-  net_r:add(nn.SpatialConvolution(   3  , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_r:add(nn.ReLU(true))
-  net_r:add(nn.SpatialConvolution(   64 , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_r:add(nn.ReLU(true))
-  net_r:add(nn.SpatialConvolution(   64 , 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net_r:add(nn.ReLU(true))
-
-  net_p:add(net_l)
-  net_p:add(net_r)
-
-  net:add(net_p)
-  net:add(nn.SpatialConvolution(  128, 64  , 3 , 3 , 1 , 1 , 1   , 1   ))
+                                    --nIn  , nOut, kW, kH, dW, dH, padW, padH 
+  net:add(nn.SpatialFullConvolution(   1024, 1024, 4 , 4 , 2 , 2 , 1   , 1   ))
   net:add(nn.ReLU(true))
-  net:add(nn.SpatialConvolution(   64, 3   , 3 , 3 , 1 , 1 , 1   , 1   ))
+  
+  net:add(nn.SpatialFullConvolution(   1024, 512 , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(nn.ReLU(true))
+  
+  net:add(nn.SpatialFullConvolution(   512 , 256 , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(nn.ReLU(true))
+ 
+  net:add(nn.SpatialFullConvolution(   256 , 128 , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(nn.ReLU(true))
+
+  net:add(nn.SpatialFullConvolution(   128 , 64  , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(nn.ReLU(true))
+
+  net:add(nn.SpatialConvolution(       64  , 3   , 3 , 3 , 1 , 1 , 1   , 1   ))
+  net:add(nn.ReLU(true))
+
   net:add(nn.Sigmoid(true))
   criterion = nn.MSECriterion()
 end
@@ -267,67 +276,4 @@ for epoch=1, opt.epoch do
   net:clearState()
   torch.save(('net/net_%s_%d.t7'):format(opt.g and 'gpu' or 'cpu', epoch), net, 'ascii')
 end -- for epoch=1, opt.epoch do
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
----- Transfer Learning
----- Using the first layers of VGG netwrok for feature extraction.
---net_encoder = nn.Sequential()
---for i=1, #vgg.modules do
---  m = vgg:get(i)
---  if torch.typename(m) == 'nn.View' or torch.typename(m) == 'cudnn.View' then  --!!!! for gpu it should be tested.
---    break
---  end
---  net_encoder:add(m)
---end
---net_encoder:add(nn.Reshape(opt.bs, 2*512)) --concatenation L & R
---
---net_decoder = nn.Sequential()
---if opt.g then
---                                             --nIn , nOut, kW, kH, dW, dH, padW, padH
---  net_decoder:add(cudnn.SpatialFullConvolution(1024, 512 , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(cudnn.ReLU(true))
---  net_decoder:add(cudnn.SpatialFullConvolution(512 , 256 , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(cudnn.ReLU(true))
---  net_decoder:add(cudnn.SpatialFullConvolution(256 , 128 , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(cudnn.ReLU(true))
---  net_decoder:add(cudnn.SpatialFullConvolution(128 , 64  , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(cudnn.ReLU(true))
---  net_decoder:add(cudnn.SpatialFullConvolution(64  , 3   , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(cudnn.ReLU(true))
---else
---  net_decoder:add(nn.SpatialFullConvolution(   1024, 512 , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(nn.ReLU(true))
---  net_decoder:add(nn.SpatialFullConvolution(   512 , 256 , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(nn.ReLU(true))
---  net_decoder:add(nn.SpatialFullConvolution(   256 , 128 , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(nn.ReLU(true))
---  net_decoder:add(nn.SpatialFullConvolution(   128 , 64  , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(nn.ReLU(true))
---  net_decoder:add(nn.SpatialFullConvolution(   64  , 3   , 4 , 4 , 2 , 2 , 1   , 1   ))
---  net:decoder:add(nn.ReLU(true))
---
---end
 

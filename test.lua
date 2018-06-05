@@ -7,7 +7,7 @@ io.stdout:setvbuf('no')
 
 cmd = torch.CmdLine()
 cmd:option('-g', false, 'gpu enabled')
-cmd:option('-test_samples', '3')
+cmd:option('-test_samples', '1')
 cmd:option('-net_fname', 'net/net_cpu_10.t7')
 opt = cmd:parse(arg)
 
@@ -109,13 +109,21 @@ print('i \t light \t exposure \t error')
 for i=1, #X do
   XX = X[i]
   YY = Y[i]
-  image.save(('out/_%d_%s_gt.png'):format(i, gpu_en), YY[1])
-  y_batch:resize(1, 1, YY[1]:size(1), YY[1]:size(2), YY[1]:size(3))
-  y_batch[1][1]:copy(YY[1])
+  hYY = YY[1]:size(2)
+  wYY = YY[1]:size(3)
+  hYY = math.floor(YY[1]:size(2)/32)*32
+  wYY = math.floor(YY[1]:size(3)/32)*32
+
+  image.save(('out/_%d_%s_gt.png'):format(i, gpu_en), YY[1][{{},{1,hYY},{1,wYY}}])
+  y_batch:resize(1, 1, YY[1]:size(1), hYY, wYY)
+  y_batch[1][1]:copy(YY[1][{{},{1,hYY},{1,wYY}}])
   for l=1, #XX do
     for e=1, XX[l]:size(1) do
-      im0 = XX[l][e][1][{{},{},{}}]:squeeze()
-      im1 = XX[l][e][2][{{},{},{}}]:squeeze()
+      hXX = math.floor(XX[l][e][1]:size(2)/32)*32
+      wXX = math.floor(XX[l][e][1]:size(3)/32)*32
+
+      im0 = XX[l][e][1][{{},{1,hXX},{1,wXX}}]:squeeze()
+      im1 = XX[l][e][2][{{},{1,hXX},{1,wXX}}]:squeeze()
 
       x_batch:resize(2, 1, im0:size(1), im0:size(2), im0:size(3))
       x_batch[1][1]:copy(im0)
