@@ -109,21 +109,19 @@ print('i \t light \t exposure \t error')
 for i=1, #X do
   XX = X[i]
   YY = Y[i]
-  hYY = YY[1]:size(2)
-  wYY = YY[1]:size(3)
-  hYY = math.floor(YY[1]:size(2)/32)*32
-  wYY = math.floor(YY[1]:size(3)/32)*32
 
-  image.save(('out/_%d_%s_gt.png'):format(i, gpu_en), YY[1][{{},{1,hYY},{1,wYY}}])
-  y_batch:resize(1, 1, YY[1]:size(1), hYY, wYY)
-  y_batch[1][1]:copy(YY[1][{{},{1,hYY},{1,wYY}}])
+  image.save(('out/_%d_%s_gt.png'):format(i, gpu_en), YY[1][{{},{100,600},{100,600}}])
+  --y_batch:resize(1, 1, YY[1]:size(1), YY[1]:size(2), YY[1]:size(3))
+  y_batch:resize(1, 1, YY[1]:size(1), 501, 501)
+  --y_batch[1][1]:copy(YY[1][{{},{},{}}])
+  y_batch[1][1]:copy(YY[1][{{},{100,600},{100,600}}])
   for l=1, #XX do
     for e=1, XX[l]:size(1) do
-      hXX = math.floor(XX[l][e][1]:size(2)/32)*32
-      wXX = math.floor(XX[l][e][1]:size(3)/32)*32
+      im0 = XX[l][e][1][{{},{},{}}]:squeeze()
+      im1 = XX[l][e][2][{{},{},{}}]:squeeze()
 
-      im0 = XX[l][e][1][{{},{1,hXX},{1,wXX}}]:squeeze()
-      im1 = XX[l][e][2][{{},{1,hXX},{1,wXX}}]:squeeze()
+      im0 = im0[{{},{100,600},{100,600}}]
+      im1 = im1[{{},{100,600},{100,600}}]
 
       x_batch:resize(2, 1, im0:size(1), im0:size(2), im0:size(3))
       x_batch[1][1]:copy(im0)

@@ -2,7 +2,8 @@
 
 require 'sys'
 require 'torch'
-require 'loadcaffe'
+require 'optim'
+--require 'loadcaffe'
 
 io.stdout:setvbuf('no')
 
@@ -18,7 +19,8 @@ cmd:option('-patchSizeTr', 32)
 cmd:option('-epoch', 10)
 cmd:option('-lr', 0.003)
 cmd:option('-sceneNum', 22)
-cmd:option('mom', 0.9)
+cmd:option('-beta1', 0.9)
+cmd:option('-beta2', 0.9)
 opt = cmd:parse(arg)
 
 if opt.g then
@@ -33,9 +35,9 @@ torch.manualSeed(opt.seed)
 if opt.g then
   cutorch.manualSeed(opt.seed)
   cutorch.setDevice(tonumber(opt.gpu))
-  vgg = loadcaffe.load(opt.vggProto, opt.vggmodel, 'cudnn')
+  --vgg = loadcaffe.load(opt.vggProto, opt.vggmodel, 'cudnn')
 else
-  vgg = loadcaffe.load(opt.vggProto, opt.vggmodel, 'nn')
+  --vgg = loadcaffe.load(opt.vggProto, opt.vggmodel, 'nn')
 end
 
 
@@ -112,100 +114,104 @@ for n = 1, opt.sceneNum do
 end
 print('Loaded trainig data.')
 
--- Transfer Learning
--- Using the first layers of VGG netwrok for feature extraction.
-vgg_l = nn.Sequential()
-vgg_r = nn.Sequential()
-for i=1, #vgg.modules do
-  m = vgg:get(i)
-  if torch.typename(m) == 'nn.View' or torch.typename(m) == 'cudnn.View' then  --!!!! for gpu it should be tested.
-    break
-  end
-  vgg_l:add(m)
-  vgg_r:add(m)
-end
-
+net_l = nn.Sequential()
+net_r = nn.Sequential()
 net = nn.Sequential()
 net_p = nn.Parallel(1,2)
-net_p:add(vgg_l)
-net_p:add(vgg_r)
-net:add(net_p)
-
 if opt.g then
-                                    --nIn  , nOut, kW, kH, dW, dH, padW, padH 
-  net:add(cudnn.SpatialFullConvolution(1024, 1024, 4 , 4 , 2 , 2 , 1   , 1   ))
-  net:add(cudnn.ReLU(true))
-  
-  net:add(cudnn.SpatialFullConvolution(1024, 512 , 4 , 4 , 2 , 2 , 1   , 1   ))
-  net:add(cudnn.ReLU(true))
-  
-  net:add(cudnn.SpatialFullConvolution(512 , 256 , 4 , 4 , 2 , 2 , 1   , 1   ))
-  net:add(cudnn.ReLU(true))
+  net_l:add(cudnn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
+  net_l:add(cudnn.ReLU(true))
+  net_l:add(cudnn.SpatialConvolution(16 , 32 , 3, 3, 1, 1, 1, 1))
+  net_l:add(cudnn.ReLU(true))
+  net_l:add(cudnn.SpatialConvolution(32 , 64 , 3, 3, 1, 1, 1, 1))
+  net_l:add(cudnn.ReLU(true))
+  net_l:add(cudnn.SpatialConvolution(64 , 128, 3, 3, 1, 1, 1, 1))
+  net_l:add(cudnn.ReLU(true))
+  net_l:add(cudnn.SpatialConvolution(128, 256, 3, 3, 1, 1, 1, 1))
+  net_l:add(cudnn.ReLU(true))
+  net_l:add(cudnn.SpatialConvolution(256, 512, 3, 3, 1, 1, 1, 1))
+  net_l:add(cudnn.ReLU(true))
+  net_l:add(cudnn.SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1))
+  net_l:add(cudnn.ReLU(true))
+
+  net_r:add(cudnn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
+  net_r:add(cudnn.ReLU(true))
+  net_r:add(cudnn.SpatialConvolution(16 , 32 , 3, 3, 1, 1, 1, 1))
+  net_r:add(cudnn.ReLU(true))
+  net_r:add(cudnn.SpatialConvolution(32 , 64 , 3, 3, 1, 1, 1, 1))
+  net_r:add(cudnn.ReLU(true))
+  net_r:add(cudnn.SpatialConvolution(64 , 128, 3, 3, 1, 1, 1, 1))
+  net_r:add(cudnn.ReLU(true))
+  net_r:add(cudnn.SpatialConvolution(128, 256, 3, 3, 1, 1, 1, 1))
+  net_r:add(cudnn.ReLU(true))
+  net_r:add(cudnn.SpatialConvolution(256, 512, 3, 3, 1, 1, 1, 1))
+  net_r:add(cudnn.ReLU(true))
+  net_r:add(cudnn.SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1))
+  net_r:add(cudnn.ReLU(true))
  
-  net:add(cudnn.SpatialFullConvolution(256 , 128 , 4 , 4 , 2 , 2 , 1   , 1   ))
-  net:add(cudnn.ReLU(true))
+  net_p:add(net_l)
+  net_p:add(net_r)
+  
+  net:add(net_p)
 
-  net:add(cudnn.SpatialFullConvolution(128 , 64  , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(cudnn.SpatialConvolution(1024, 1024, 3, 3, 1, 1, 1, 1))
   net:add(cudnn.ReLU(true))
-
-  net:add(cudnn.SpatialConvolution(    64  , 3   , 3 , 3 , 1 , 1 , 1   , 1   ))
+  net:add(cudnn.SpatialConvolution(1024, 750 , 3, 3, 1, 1, 1, 1))
   net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(750 , 512 , 3, 3, 1, 1, 1, 1))
+  net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(512, 512 , 3, 3, 1, 1, 1, 1))
+  net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(512 , 256 , 3, 3, 1, 1, 1, 1))
+  net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(256 , 128  , 3, 3, 1, 1, 1, 1))
+  net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(128 , 128  , 3, 3, 1, 1, 1, 1))
+  net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(128 , 64  , 3, 3, 1, 1, 1, 1))
+  net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(64 , 32  , 3, 3, 1, 1, 1, 1))
+  net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(32 , 16  , 3, 3, 1, 1, 1, 1))
+  net:add(cudnn.ReLU(true))
+  net:add(cudnn.SpatialConvolution(16 , 3  , 3, 3, 1, 1, 1, 1))
 
-  net:add(cudnn.Sigmoid(true))
   net:cuda()
   criterion = nn.MSECriterion():cuda()
 else
-                                    --nIn  , nOut, kW, kH, dW, dH, padW, padH 
-  net:add(nn.SpatialFullConvolution(   1024, 1024, 4 , 4 , 2 , 2 , 1   , 1   ))
-  net:add(nn.ReLU(true))
+  net_l:add(nn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
+  net_l:add(nn.ReLU(true))
+  net_l:add(nn.SpatialConvolution(16 , 32 , 3, 3, 1, 1, 1, 1))
+  net_l:add(nn.ReLU(true))
+
+  net_r:add(nn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
+  net_r:add(nn.ReLU(true))
+  net_r:add(nn.SpatialConvolution(16 , 32 , 3, 3, 1, 1, 1, 1))
+  net_r:add(nn.ReLU(true))
   
-  net:add(nn.SpatialFullConvolution(   1024, 512 , 4 , 4 , 2 , 2 , 1   , 1   ))
-  net:add(nn.ReLU(true))
+  net_p:add(net_l)
+  net_p:add(net_r)
   
-  net:add(nn.SpatialFullConvolution(   512 , 256 , 4 , 4 , 2 , 2 , 1   , 1   ))
-  net:add(nn.ReLU(true))
- 
-  net:add(nn.SpatialFullConvolution(   256 , 128 , 4 , 4 , 2 , 2 , 1   , 1   ))
-  net:add(nn.ReLU(true))
+  net:add(net_p)
 
-  net:add(nn.SpatialFullConvolution(   128 , 64  , 4 , 4 , 2 , 2 , 1   , 1   ))
+  net:add(nn.SpatialConvolution(64, 32, 3, 3, 1, 1, 1, 1))
   net:add(nn.ReLU(true))
+  net:add(nn.SpatialConvolution(32, 3 , 3, 3, 1, 1, 1, 1))
 
-  net:add(nn.SpatialConvolution(       64  , 3   , 3 , 3 , 1 , 1 , 1   , 1   ))
-  net:add(nn.ReLU(true))
-
-  net:add(nn.Sigmoid(true))
   criterion = nn.MSECriterion()
 end
 
 print(net)
 
-params = {}
-grads = {}
-momentums = {}
-for i = 1,net:size() do
-  local m = net:get(i)
-  if m.weight then
-    if opt.g then
-      m.weight_v = torch.CudaTensor(m.weight:size()):zero()
-    else
-      m.weight_v = torch.Tensor(m.weight:size()):zero()
-    end
-    table.insert(params, m.weight)
-    table.insert(grads, m.gradWeight)
-    table.insert(momentums, m.weight_v)
-  end
-  if m.bias then
-    if opt.g then
-      m.bias_v = torch.CudaTensor(m.bias:size()):zero()
-    else
-      m.bias_v = torch.Tensor(m.bias:size()):zero()
-    end
-    table.insert(params, m.bias)
-    table.insert(grads, m.gradBias)
-    table.insert(momentums, m.bias_v)
-  end
-end
+params, gradParams = net:getParameters()
+local optimState = {
+                    learningRate = opt.lr,
+--                    learningRateDecay = 0,
+--                    weightDecay = 0,
+                    beta1 = opt.beta1,
+                    beta2 = opt.beta2
+--                    epsilon = 
+                   }
 
 if opt.g then
   x_batch_tr = torch.CudaTensor(2, opt.bs, 3, opt.patchSizeTr, opt.patchSizeTr)
@@ -218,10 +224,11 @@ x_batch_tr_ = torch.FloatTensor(x_batch_tr:size())
 y_batch_tr_ = torch.FloatTensor(y_batch_tr:size())
 
 time = sys.clock()
+err_tr = 0
+err_tr_cnt = 0
 for epoch=1, opt.epoch do
-  --print(('epoch = %d'):format(epoch))
-  local err_tr = 0
-  local err_tr_cnt = 0
+  err_tr = 0
+  err_tr_cnt = 0
   perm = torch.randperm(#X)
   for sample=1, #X do
     --print(('sample = %d'):format(sample))
@@ -250,27 +257,22 @@ for epoch=1, opt.epoch do
     x_batch_tr:copy(x_batch_tr_)
     y_batch_tr:copy(y_batch_tr_)
 
-    for i=1, #params do
-      grads[i]:zero()
+    function feval(params)
+      gradParams:zero()
+      local outputs = net:forward(x_batch_tr)
+      local loss = criterion:forward(outputs, y_batch_tr)
+      local dloss_doutputs = criterion:backward(outputs, y_batch_tr)
+      net:backward(x_batch_tr, dloss_doutputs)
+
+      err_tr = err_tr + loss
+      return loss, gradParams
     end
 
-    net:forward(x_batch_tr)
-    local err = criterion:forward(net.output, y_batch_tr)
-    if err >= 0 and err < 100 then
-      err_tr = err_tr + err
-      err_tr_cnt = err_tr_cnt + 1
-    else
-      print(('WARNING! err=%f'):format(err))
-    end
-
-    criterion:backward(net.output, y_batch_tr)
-    net:backward(x_batch_tr, criterion.gradInput)
+    optim.adam(feval, params, optimState)
     
-    for i=1, #params do
-      momentums[i]:mul(opt.mom):add(-opt.lr, grads[i])
-      params[i]:add(momentums[i])
-    end
-  end  -- for sample=1, #X do
+    err_tr_cnt = err_tr_cnt + 1
+  end
+
   print(epoch, err_tr / err_tr_cnt, sys.clock()-time)
   collectgarbage()
   net:clearState()

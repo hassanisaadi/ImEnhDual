@@ -8,5 +8,5 @@
 #SBATCH --job-name=train_cpu
 echo "Starting run at: `date`"
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/cvmfs/soft.computecanada.ca/easybuild/software/2017/avx2/CUDA/intel2016.4/cuda8.0/cudnn/5.1/lib64
-./train.lua -sceneNum 22 -epoch 10 -patchSizeTr 64 -bs 128
+./train.lua -sceneNum 22 -epoch 20 -patchSizeTr 32 -bs 128
 
