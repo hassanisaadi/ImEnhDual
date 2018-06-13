@@ -30,7 +30,7 @@ output_dir = './data_mb2014_{}'.format(dark_bright)
 test_samples = 1
 
 ### 2014 dataset ###
-base1 = '../imenhdual_gans/scenes2014'
+base1 = '../scenes2014'
 for dir in sorted(os.listdir(base1)):
     print(dir.split('0')[0])
 

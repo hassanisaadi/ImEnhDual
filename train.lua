@@ -3,6 +3,7 @@
 require 'sys'
 require 'torch'
 require 'optim'
+require 'models'
 --require 'loadcaffe'
 
 io.stdout:setvbuf('no')
@@ -12,15 +13,18 @@ cmd:option('-g', false, 'gpu enabled')
 cmd:option('-gpu', 1, 'gpu id')
 cmd:option('-seed', 42, 'random seed')
 cmd:option('-debug', false)
-cmd:option('-vggmodel', './pretrained_nets/VGG_ILSVRC_16_layers.caffemodel')
-cmd:option('-vggProto', './pretrained_nets/VGG_ILSVRC_16_layers_deploy.prototxt')
+--cmd:option('-vggmodel', './pretrained_nets/VGG_ILSVRC_16_layers.caffemodel')
+--cmd:option('-vggProto', './pretrained_nets/VGG_ILSVRC_16_layers_deploy.prototxt')
 cmd:option('-bs', 32)
 cmd:option('-patchSizeTr', 32)
 cmd:option('-epoch', 10)
 cmd:option('-lr', 0.003)
 cmd:option('-sceneNum', 22)
 cmd:option('-beta1', 0.9)
-cmd:option('-beta2', 0.9)
+cmd:option('-beta2', 0.999)
+cmd:option('-data_dir', 'data_mb2014_dark')
+cmd:option('-bsperscene', 10)
+cmd:option('-arch', '', 'network architecture')
 opt = cmd:parse(arg)
 
 if opt.g then
@@ -90,15 +94,13 @@ function fromfile(fname)
 end
 
 -- Loading train data
-data_dir = 'data.mb.2014'
-
 X = {}
 Y = {}
 for n = 1, opt.sceneNum do
   local XX = {}
   light = 1
   while true do
-    fname = ('%s/x_train_%d_%d.bin'):format(data_dir, n, light)
+    fname = ('%s/x_train_%d_%d.bin'):format(opt.data_dir, n, light)
     if not paths.filep(fname) then
       break
     end
@@ -107,98 +109,18 @@ for n = 1, opt.sceneNum do
   end
   table.insert(X, XX)
   
-  fname = ('%s/y_train_%d.bin'):format(data_dir, n)
+  fname = ('%s/y_train_%d.bin'):format(opt.data_dir, n)
   if paths.filep(fname) then
     table.insert(Y, fromfile(fname))
   end
 end
 print('Loaded trainig data.')
 
-net_l = nn.Sequential()
-net_r = nn.Sequential()
-net = nn.Sequential()
-net_p = nn.Parallel(1,2)
-if opt.g then
-  net_l:add(cudnn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
-  net_l:add(cudnn.ReLU(true))
-  net_l:add(cudnn.SpatialConvolution(16 , 32 , 3, 3, 1, 1, 1, 1))
-  net_l:add(cudnn.ReLU(true))
-  net_l:add(cudnn.SpatialConvolution(32 , 64 , 3, 3, 1, 1, 1, 1))
-  net_l:add(cudnn.ReLU(true))
-  net_l:add(cudnn.SpatialConvolution(64 , 128, 3, 3, 1, 1, 1, 1))
-  net_l:add(cudnn.ReLU(true))
-  net_l:add(cudnn.SpatialConvolution(128, 256, 3, 3, 1, 1, 1, 1))
-  net_l:add(cudnn.ReLU(true))
-  net_l:add(cudnn.SpatialConvolution(256, 512, 3, 3, 1, 1, 1, 1))
-  net_l:add(cudnn.ReLU(true))
-  net_l:add(cudnn.SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1))
-  net_l:add(cudnn.ReLU(true))
-
-  net_r:add(cudnn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
-  net_r:add(cudnn.ReLU(true))
-  net_r:add(cudnn.SpatialConvolution(16 , 32 , 3, 3, 1, 1, 1, 1))
-  net_r:add(cudnn.ReLU(true))
-  net_r:add(cudnn.SpatialConvolution(32 , 64 , 3, 3, 1, 1, 1, 1))
-  net_r:add(cudnn.ReLU(true))
-  net_r:add(cudnn.SpatialConvolution(64 , 128, 3, 3, 1, 1, 1, 1))
-  net_r:add(cudnn.ReLU(true))
-  net_r:add(cudnn.SpatialConvolution(128, 256, 3, 3, 1, 1, 1, 1))
-  net_r:add(cudnn.ReLU(true))
-  net_r:add(cudnn.SpatialConvolution(256, 512, 3, 3, 1, 1, 1, 1))
-  net_r:add(cudnn.ReLU(true))
-  net_r:add(cudnn.SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1))
-  net_r:add(cudnn.ReLU(true))
- 
-  net_p:add(net_l)
-  net_p:add(net_r)
-  
-  net:add(net_p)
-
-  net:add(cudnn.SpatialConvolution(1024, 1024, 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(1024, 750 , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(750 , 512 , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(512, 512 , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(512 , 256 , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(256 , 128  , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(128 , 128  , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(128 , 64  , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(64 , 32  , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(32 , 16  , 3, 3, 1, 1, 1, 1))
-  net:add(cudnn.ReLU(true))
-  net:add(cudnn.SpatialConvolution(16 , 3  , 3, 3, 1, 1, 1, 1))
-
-  net:cuda()
-  criterion = nn.MSECriterion():cuda()
+if     opt.arch == 'simple_cnn' then net, criterion, net_name = simple_cnn(opt.g)
+elseif opt.arch == 'enc_dec'    then net, criterion, net_name = enc_dec(opt.g)
 else
-  net_l:add(nn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
-  net_l:add(nn.ReLU(true))
-  net_l:add(nn.SpatialConvolution(16 , 32 , 3, 3, 1, 1, 1, 1))
-  net_l:add(nn.ReLU(true))
-
-  net_r:add(nn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
-  net_r:add(nn.ReLU(true))
-  net_r:add(nn.SpatialConvolution(16 , 32 , 3, 3, 1, 1, 1, 1))
-  net_r:add(nn.ReLU(true))
-  
-  net_p:add(net_l)
-  net_p:add(net_r)
-  
-  net:add(net_p)
-
-  net:add(nn.SpatialConvolution(64, 32, 3, 3, 1, 1, 1, 1))
-  net:add(nn.ReLU(true))
-  net:add(nn.SpatialConvolution(32, 3 , 3, 3, 1, 1, 1, 1))
-
-  criterion = nn.MSECriterion()
+  print('wrong architecture')
+  os.exit()
 end
 
 print(net)
@@ -231,51 +153,44 @@ for epoch=1, opt.epoch do
   err_tr_cnt = 0
   perm = torch.randperm(#X)
   for sample=1, #X do
-    --print(('sample = %d'):format(sample))
-    scene_idx = perm[sample]
-    XX = X[scene_idx]
-    YY = Y[scene_idx]
-    for b=1, opt.bs do
-      --print(('#XX = %d'):format(#XX))
-      --print(XX[1]:size())
-      l_idx = torch.random(#XX)
-      exp_idx = torch.random(XX[l_idx]:size(1))
+    XX = X[perm[sample]]
+    YY = Y[perm[sample]]
+    for bsps = 1, opt.bsperscene do
+      for b=1, opt.bs do
+        l_idx = torch.random(#XX)
+        exp_idx = torch.random(XX[l_idx]:size(1))
+  
+        r = torch.random(XX[l_idx]:size(4)-opt.patchSizeTr+1)
+        c = torch.random(XX[l_idx]:size(5)-opt.patchSizeTr+1)
+  
+        x_batch_tr_[1][b] = XX[l_idx][{{exp_idx},{1},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
+        x_batch_tr_[2][b] = XX[l_idx][{{exp_idx},{2},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
+        y_batch_tr_[1][b] = YY[1][{{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
+      end
+  
+      x_batch_tr:copy(x_batch_tr_:mul(2/255):add(-1)) --normalization between -1,1
+      y_batch_tr:copy(y_batch_tr_:mul(2/255):add(-1))
 
-      r = torch.random(XX[l_idx]:size(4)-opt.patchSizeTr+1)
-      c = torch.random(XX[l_idx]:size(5)-opt.patchSizeTr+1)
-
-      --print(XX[l_idx][{{exp_idx},{1},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]:size())
-      x_batch_tr_[1][b] = XX[l_idx][{{exp_idx},{1},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
-      x_batch_tr_[2][b] = XX[l_idx][{{exp_idx},{2},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
-      --print(#YY)
-      --print(YY[1]:size())
-      y_batch_tr_[1][b]  = YY[1][{{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
-      --print(YY[1][{{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]:size())
-      --print(y_batch_tr_[b]:size())
-    end
-
-    x_batch_tr:copy(x_batch_tr_)
-    y_batch_tr:copy(y_batch_tr_)
-
-    function feval(params)
-      gradParams:zero()
-      local outputs = net:forward(x_batch_tr)
-      local loss = criterion:forward(outputs, y_batch_tr)
-      local dloss_doutputs = criterion:backward(outputs, y_batch_tr)
-      net:backward(x_batch_tr, dloss_doutputs)
-
-      err_tr = err_tr + loss
-      return loss, gradParams
-    end
-
-    optim.adam(feval, params, optimState)
-    
-    err_tr_cnt = err_tr_cnt + 1
-  end
+      function feval(params)
+        gradParams:zero()
+        local outputs = net:forward(x_batch_tr)
+        local loss = criterion:forward(outputs, y_batch_tr)
+        local dloss_doutputs = criterion:backward(outputs, y_batch_tr)
+        net:backward(x_batch_tr, dloss_doutputs)
+  
+        err_tr = err_tr + loss
+        return loss, gradParams
+      end
+  
+      optim.adam(feval, params, optimState)
+      
+      err_tr_cnt = err_tr_cnt + 1
+    end --for bsps=1, opt.bsperscene do
+  end --for sample=1, #X do
 
   print(epoch, err_tr / err_tr_cnt, sys.clock()-time)
   collectgarbage()
   net:clearState()
-  torch.save(('net/net_%s_%d.t7'):format(opt.g and 'gpu' or 'cpu', epoch), net, 'ascii')
+  torch.save(('net/net_%s_%s_bs%d_p%d_bsps%d_e%d.t7'):format(opt.g and 'gpu' or 'cpu', net_name, opt.bs, opt.patchSizeTr, opt.bsperscene, epoch), net, 'ascii')
 end -- for epoch=1, opt.epoch do
 

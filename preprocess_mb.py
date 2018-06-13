@@ -13,7 +13,8 @@ def read_im(fname, downsample):
     x = cv2.imread(fname).astype(np.float32)
     x = cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
     x = x.transpose(2, 0, 1)
-    x = (x - x.mean()) / x.std()
+    #x = (x - x.mean()) / x.std()
+    x = x / 255.0
     return x[None]
 
 def tofile(fname, x):

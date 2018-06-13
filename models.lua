@@ -76,7 +76,8 @@ function simple_cnn(gpu_en)
     net:add(cudnn.Tanh())
   
     net:cuda()
-    criterion = nn.MSECriterion():cuda()
+    --criterion = nn.MSECriterion():cuda()
+    criterion = nn.AbsCriterion():cuda()
   else
     net_l:add(nn.SpatialConvolution(3  , 16 , 3, 3, 1, 1, 1, 1))
     net_l:add(nn.ReLU(true))
@@ -98,7 +99,8 @@ function simple_cnn(gpu_en)
     net:add(nn.SpatialConvolution(32, 3 , 3, 3, 1, 1, 1, 1))
     net:add(nn.Tanh())
   
-    criterion = nn.MSECriterion()
+    --criterion = nn.MSECriterion()
+    criterion = nn.AbsCriterion()
   end
 
   net:apply(weights_init)
@@ -206,7 +208,8 @@ function enc_dec(gpu_en)
     net:add(cudnn.Tanh())
 
     net:cuda()
-    criterion = nn.MSECriterion():cuda()
+    --criterion = nn.MSECriterion():cuda()
+    criterion = nn.AbsCriterion():cuda()
   else
     e_l:add(nn.SpatialConvolution(3  , 8  , 3, 3, 1, 1, 1, 1))
     e_r:add(nn.SpatialConvolution(3  , 8  , 3, 3, 1, 1, 1, 1))
@@ -257,7 +260,8 @@ function enc_dec(gpu_en)
     net:add(nn.SpatialConvolution(4, 3, 3, 3, 1, 1, 1, 1))
     net:add(nn.Tanh())
 
-    criterion = nn.MSECriterion()
+    --criterion = nn.MSECriterion()
+    criterion = nn.AbsCriterion()
   end
 
   net:apply(weights_init)
