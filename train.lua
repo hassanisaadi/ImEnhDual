@@ -13,33 +13,22 @@ cmd = torch.CmdLine()
 cmd:option('-g', false, 'gpu enabled')
 cmd:option('-gpu', 1, 'gpu id')
 cmd:option('-seed', 42, 'random seed')
-cmd:option('-debug', false)
 --cmd:option('-vggmodel', './pretrained_nets/VGG_ILSVRC_16_layers.caffemodel')
 --cmd:option('-vggProto', './pretrained_nets/VGG_ILSVRC_16_layers_deploy.prototxt')
 cmd:option('-bs', 32)
 cmd:option('-patchSizeTr', 32)
-cmd:option('-epoch', 10)
 cmd:option('-lr', 0.003)
 cmd:option('-sceneNum', 22)
 cmd:option('-beta1', 0.9)
 cmd:option('-beta2', 0.999)
 cmd:option('-data_dir', 'data_mb2014_dark')
 cmd:option('-arch', '', 'network architecture')
-cmd:option('-aug', false, 'Data Augmentation Enable')
-
-cmd:option('-transX',2)
-cmd:option('-transY',2)
-cmd:option('-scaleR', 0.2)
-cmd:option('-rotate', 28, 'degree')
-cmd:option('-hflip', 0.5, 'chance of hflip')
-cmd:option('-vflip', 0.5, 'chance of vflip')
-cmd:option('-contrastR', 0.05, 'range of contrast')
+cmd:option('-continueLearning', false)
+cmd:option('-last_net_name', './net/a.t7')
+cmd:option('-epoch_start', 1)
+cmd:option('-epoch_end', 10)
 
 opt = cmd:parse(arg)
-
-if opt.aug then
-  require 'libcv'
-end
 
 if opt.g then
   require 'cunn'
@@ -130,13 +119,27 @@ for n = 1, opt.sceneNum do
 end
 print('Loaded trainig data.')
 
-if     opt.arch == 'simple_cnn' then net, criterion, net_name = simple_cnn(opt.g)
-elseif opt.arch == 'enc_dec'    then net, criterion, net_name = enc_dec(opt.g)
+if opt.continueLearning then
+  assert(string.find(opt.last_net_name, opt.arch))
+  net = torch.load(opt.last_net_name, 'ascii')
+  criterion = opt.g and nn.AbsCriterion():cuda() or nn.AbsCriterion()
+  net_name = opt.arch
+  epochS = opt.epoch_start
+  epochE = opt.epoch_end
 else
-  print('wrong architecture')
-  os.exit()
+  if     opt.arch == 'simple_cnn' then net, criterion, net_name = simple_cnn(opt.g)
+  elseif opt.arch == 'enc_dec'    then net, criterion, net_name = enc_dec(opt.g)
+  else
+    print('wrong architecture')
+    os.exit()
+  end
+  epochS = 1
+  epochE = opt.epoch_end
 end
+assert(net_name == opt.arch)
+assert(opt.epoch_end > epochS)
 
+print(net_name)
 print(net)
 
 params, gradParams = net:getParameters()
@@ -145,43 +148,24 @@ local optimState = {
 --                    learningRateDecay = 0,
 --                    weightDecay = 0,
                     beta1 = opt.beta1,
-                    beta2 = opt.beta2
---                    epsilon = 
+                    beta2 = opt.beta2,
+                    epsilon = 10e-8
                    }
 
 if opt.g then
   x_batch_tr = torch.CudaTensor(2, opt.bs, 3, opt.patchSizeTr, opt.patchSizeTr)
-  y_batch_tr = torch.CudaTensor(1, opt.bs, 3, opt.patchSizeTr, opt.patchSizeTr)
+  y_batch_tr = torch.CudaTensor(opt.bs, 3, opt.patchSizeTr, opt.patchSizeTr)
 else
   x_batch_tr = torch.Tensor(2, opt.bs, 3, opt.patchSizeTr, opt.patchSizeTr)
-  y_batch_tr = torch.Tensor(1, opt.bs, 3, opt.patchSizeTr, opt.patchSizeTr)
+  y_batch_tr = torch.Tensor(opt.bs, 3, opt.patchSizeTr, opt.patchSizeTr)
 end
 x_batch_tr_ = torch.FloatTensor(x_batch_tr:size())
 y_batch_tr_ = torch.FloatTensor(y_batch_tr:size())
 
-function normalize(x_b)
-  -- normalization between -1,1
-  if opt.aug then
-    x_b_n = torch.FloatTensor(x_b:size())
-    MR = x_b[1]:max(); mR = x_b[1]:min()
-    MG = x_b[2]:max(); mG = x_b[2]:min()
-    MB = x_b[3]:max(); mB = x_b[3]:min()
-  
-    x_b[1]:add(-mR):mul(2/(MR-mR)):add(-1)
-    x_b[2]:add(-mG):mul(2/(MG-mG)):add(-1)
-    x_b[3]:add(-mB):mul(2/(MB-mB)):add(-1)
-    x_b_n:copy(x_b)
-  else
-    x_b_n:copy(x_b:mul(2/255):add(-1))
-  end
-  return x_b_n
-end
-
-
 time = sys.clock()
 err_tr = 0
 err_tr_cnt = 0
-for epoch=1, opt.epoch do
+for epoch=epochS, epochE do
   err_tr = 0
   err_tr_cnt = 0
   perm = torch.randperm(#X)
@@ -191,65 +175,20 @@ for epoch=1, opt.epoch do
     for b=1, opt.bs do
       l_idx = torch.random(#XX)
       exp_idx = torch.random(XX[l_idx]:size(1))
-      if opt.aug then
-        --translation
-        local transX = torch.uniform(0, opt.transX)
-        local transY = torch.uniform(0, opt.transY)
-        XX_trans1 = image.translate(XX[l_idx][{{exp_idx},{1},{},{},{}}]:squeeze(), transX, transY)
-        XX_trans2 = image.translate(XX[l_idx][{{exp_idx},{2},{},{},{}}]:squeeze(), transX, transY)
-        YY_trans  = image.translate(YY[1][{{},{},{}}]:squeeze(), transX, transY)
-        --scale
-        local W = torch.floor(torch.uniform(1-opt.scaleR, 1+opt.scaleR) * XX_trans1:size(2))
-        local H = torch.floor(torch.uniform(1-opt.scaleR, 1+opt.scaleR) * XX_trans1:size(3))
-        XX_scale1 = image.scale(XX_trans1, W, H)
-        XX_scale2 = image.scale(XX_trans2, W, H)
-        YY_scale  = image.scale(YY_trans , W, H)
-        --rotate
-        local phi = torch.uniform(-opt.rotate, opt.rotate) * math.pi / 180
-        XX_rotat1 = image.rotate(XX_scale1, phi)
-        XX_rotat2 = image.rotate(XX_scale2, phi)
-        YY_rotat  = image.rotate(YY_scale , phi)
-        --hflip
-        if torch.uniform(0, 0.5) > opt.hflip then
-          XX_hflip1 = image.hflip(XX_rotat1)
-          XX_hflip2 = image.hflip(XX_rotat2)
-          YY_hflip  = image.hflip(YY_rotat )
-        else
-          XX_hflip1 = XX_rotat1
-          XX_hflip2 = XX_rotat2
-          YY_hflip  = YY_rotat
-        end
-        --vflip
-        if torch.uniform(0, 0.5) > opt.vflip then
-          XX_vflip1 = image.vflip(XX_hflip1)
-          XX_vflip2 = image.vflip(XX_hflip2)
-          YY_vflip  = image.vflip(YY_hflip )
-        else
-          XX_vflip1 = XX_hflip1
-          XX_vflip2 = XX_hflip2
-          YY_vflip  = YY_hflip
-        end
-        --contrast
-        local cont = torch.uniform(1-opt.contrastR, 1+opt.contrastR)
-        XX_cont1 = torch.mul(XX_vflip1, cont)
-        XX_cont2 = torch.mul(XX_vflip2, cont)
-        --extracting patch
-        r = torch.random(XX_cont1:size(2)-opt.patchSizeTr+1)
-        c = torch.random(XX_cont1:size(3)-opt.patchSizeTr+1)
-        x_batch_tr_[1][b] = normalize(XX_cont1[{{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]:squeeze())
-        x_batch_tr_[2][b] = normalize(XX_cont2[{{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]:squeeze())
-        y_batch_tr_[1][b] = normalize(YY_vflip[{{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]:squeeze())
-      else
-        r = torch.random(XX[l_idx]:size(4)-opt.patchSizeTr+1) --top left pixel
-        c = torch.random(XX[l_idx]:size(5)-opt.patchSizeTr+1)
-        x_batch_tr_[1][b] = normalize(XX[l_idx][{{exp_idx},{1},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]:squeeze())
-        x_batch_tr_[2][b] = normalize(XX[l_idx][{{exp_idx},{2},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]:squeeze())
-        y_batch_tr_[1][b] = normalize(YY[1][{{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]:squeeze())
-      end
+      r = torch.random(XX[l_idx]:size(4)-opt.patchSizeTr+1) --top left pixel
+      c = torch.random(XX[l_idx]:size(5)-opt.patchSizeTr+1)
+      x_batch_tr_[1][b] = XX[l_idx][{{exp_idx},{1},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
+      x_batch_tr_[2][b] = XX[l_idx][{{exp_idx},{2},{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
+      y_batch_tr_[b] = YY[1][{{},{r,r+opt.patchSizeTr-1},{c,c+opt.patchSizeTr-1}}]
     end
-  
-    x_batch_tr:copy(x_batch_tr_)
-    y_batch_tr:copy(y_batch_tr_)
+ 
+    x_batch_tr:copy(x_batch_tr_:mul(2/255):add(-1)) --normalization between -1,1
+    y_batch_tr:copy(y_batch_tr_:mul(2/255):add(-1))
+
+    --image.save('im0.png', x_batch_tr[1][2]:add(1):div(2))
+    --image.save('im1.png', x_batch_tr[2][2]:add(1):div(2))
+    --image.save('imy.png', y_batch_tr[2]:add(1):div(2))
+    --os.exit()
 
     function feval(params)
       gradParams:zero()
@@ -270,6 +209,6 @@ for epoch=1, opt.epoch do
   print(epoch, err_tr / err_tr_cnt, sys.clock()-time)
   collectgarbage()
   net:clearState()
-  torch.save(('net/net_%s_%s_bs%d_p%d_%s_e%d.t7'):format(opt.g and 'gpu' or 'cpu', net_name, opt.bs, opt.patchSizeTr, opt.aug and 'aug' or '', epoch), net, 'ascii')
+  torch.save(('net/net_%s_%s_bs%d_p%d_e%d.t7'):format(opt.g and 'gpu' or 'cpu', net_name, opt.bs, opt.patchSizeTr, epoch), net, 'ascii')
 end -- for epoch=1, opt.epoch do
 
