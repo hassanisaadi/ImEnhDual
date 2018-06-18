@@ -39,6 +39,7 @@ else
   require 'nn'
 end
 
+torch.setdefaulttensortype('torch.FloatTensor')
 torch.manualSeed(opt.seed)
 if opt.g then
   cutorch.manualSeed(opt.seed)
@@ -101,7 +102,7 @@ local optimState = {
                     weightDecay = 10e-6,
                     beta1 = opt.beta1,
                     beta2 = opt.beta2,
-                    epsilon = 10e-8
+                    epsilon = 1e-8
                    }
 
 if opt.g then
@@ -161,6 +162,8 @@ for epoch=epochS, epochE do
   print(epoch, err_tr / err_tr_cnt, sys.clock()-time)
   collectgarbage()
   net:clearState()
-  torch.save(('net/net_%s_%s_bs%d_p%d_e%d.t7'):format(opt.g and 'gpu' or 'cpu', net_name, opt.bs, opt.patchSizeTr, epoch), net, 'ascii')
+  if epoch % 100 == 0 then
+    torch.save(('net/net_%s_%s_bs%d_p%d_e%d.t7'):format(opt.g and 'gpu' or 'cpu', net_name, opt.bs, opt.patchSizeTr, epoch), net, 'ascii')
+  end
 end -- for epoch=1, opt.epoch do
-
+torch.save(('net/net_%s_%s_bs%d_p%d_final.t7'):format(opt.g and 'gpu' or 'cpu', net_name, opt.bs, opt.patchSizeTr), net, 'ascii')
